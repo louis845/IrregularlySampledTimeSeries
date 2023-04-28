@@ -64,33 +64,36 @@ class OdeRNN(torch.nn.Module):
         assert len(time_steps.shape) == 1, "time_steps should be a 1D tensor"
         assert (time_steps.shape[0] > 0), "time_steps should have at least one element"
         assert(torch.sum(torch.isnan(time_steps)) == 0), "time_steps should not have any nan values"
-        assert mask[0, ...].all(), "The first time step should have no nan values"
         assert mask[-1, ...].all(), "The last time step should have no nan values"
 
         # compute the first state using the obs_x, which are zeros fed into the GRU directly
         if self.compute_variance:
             latent_state_mean = torch.zeros(obs_x.shape[1:-1] + (self.latent_dims,), device=obs_x.device, dtype=torch.float32)
             latent_state_variance = torch.zeros(obs_x.shape[1:-1] + (self.latent_dims,), device=obs_x.device, dtype=torch.float32)
-            latent_state_mean, latent_state_variance = self.compute_gru(obs_x[0, ...], latent_state_mean, latent_state_variance)
         else:
             latent_state_mean = torch.zeros(obs_x.shape[1:-1] + (self.latent_dims,), device=obs_x.device, dtype=torch.float32)
-            latent_state_mean = self.compute_gru(obs_x[0, ...], latent_state_mean)
 
+        initialized = torch.zeros(obs_x.shape[1:-1], device=obs_x.device, dtype=torch.bool)
 
         # for each iteration, the latent_state is updated first with the ODE, then with the GRU. If the values of x is unknown, we do not use the GRU, which means that the ODE is continuously integrated.
         for iter in range(time_steps.shape[0] - 1):
             # use the ODE to forward the current latent states. only the mean should be updated, not the variance
-            latent_state_mean = torchdiffeq.odeint_adjoint(self.ode_func, latent_state_mean, time_steps[iter:(iter+2)], rtol=1e-2, atol=1e-4)[1, ...]
+            latent_state_mean = torch.where(initialized.unsqueeze(-1),
+                                            torchdiffeq.odeint_adjoint(self.ode_func, latent_state_mean, time_steps[iter:(iter+2)], rtol=1e-2, atol=1e-4)[1, ...],
+                                            latent_state_mean)
+
+            # update the initialized mask
+            initialized = mask[iter+1, ...] | initialized
 
             # plug into GRU only if the mask is 1.0
             # first compute the result of the GRU cell with obs_x_imputed[iter, ...] as input
             if self.compute_variance:
                 new_latent_state_mean, new_latent_state_variance = self.compute_gru(obs_x_imputed[iter+1, ...], latent_state_mean, latent_state_variance)
-                latent_state_variance = torch.where(mask[iter+1, ...].unsqueeze(-1), new_latent_state_variance, latent_state_variance)
+                latent_state_variance = torch.where(initialized.unsqueeze(-1), new_latent_state_variance, latent_state_variance)
             else:
                 new_latent_state_mean = self.compute_gru(obs_x_imputed[iter+1, ...], latent_state_mean)
 
-            latent_state_mean = torch.where(mask[iter+1, ...].unsqueeze(-1), new_latent_state_mean, latent_state_mean)
+            latent_state_mean = torch.where(initialized.unsqueeze(-1), new_latent_state_mean, latent_state_mean)
 
         if self.compute_variance:
             return self.final_projection((latent_state_mean, latent_state_variance))

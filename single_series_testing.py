@@ -1,3 +1,5 @@
+import time
+
 import matplotlib.figure
 import numpy as np
 import torch
@@ -7,9 +9,11 @@ import matplotlib.animation as animation
 import encoder_ode_rnn
 import decoder
 import utils
+import time_series_sampler
 
 def plot_to_mp4(filename, update_callback, figsize=(19.2, 10.8), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
-    fig, axs = plt.subplots(3, 1, figsize=figsize)
+    fig, axs = plt.subplots(2, 1, figsize=figsize)
+    fig.subplots_adjust(hspace=0.5)
     update_callback.set_renderers(fig, axs)
 
     # Create the animation
@@ -17,7 +21,8 @@ def plot_to_mp4(filename, update_callback, figsize=(19.2, 10.8), frames=240, fps
     anim.save(filename, fps=fps, extra_args=extra_args)
 
 def plot_interactive(update_callback, figsize=(19.2, 10.8), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
-    fig, axs = plt.subplots(3, 1, figsize=figsize)
+    fig, axs = plt.subplots(2, 1, figsize=figsize)
+    fig.subplots_adjust(hspace=0.5)
     update_callback.set_renderers(fig, axs)
 
     # Create the animation
@@ -31,8 +36,6 @@ class UpdateCallback:
         self.plot_callback = plot_callback
 
     def set_renderers(self, fig, axs: np.ndarray):
-        if len(axs.shape) == 1:
-            axs = np.expand_dims(axs, axis=0)
         self.axs = axs
         self.fig = fig
 
@@ -46,66 +49,108 @@ decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(4, 4, 64, 3,
 latent_encoder = utils.feedforward_nn(4, 2, 64, 3, device=torch.device("cuda"))
 latent_decoder = utils.feedforward_nn(2, 4, 64, 3, device=torch.device("cuda"))
 
-def function_to_approximate(t):
-    return np.sin(t)
-
-low = -8 * np.pi
-high = 8 * np.pi
-
-total_time_samples = np.linspace(low, high, 100, dtype=np.float32)
-total_function_samples = function_to_approximate(total_time_samples)
-
-# Choose randomly 30 numbers from 0 to 499 (inclusive), without replacement. The result should be sorted.
-training_indices = np.concatenate([np.sort(np.random.choice(50, 10, replace=False)), np.array([50])])
-
-training_time = total_time_samples[training_indices]
-training_function_vals = total_function_samples[training_indices]
 
 device = torch.device("cuda")
 encoder = encoder.to(device)
 decoder = decoder.to(device)
 
-# Convert to torch
-total_time_samples_torch = torch.from_numpy(total_time_samples).to(device)
-total_function_samples_torch = torch.from_numpy(total_function_samples).to(device)
-training_time_torch = torch.from_numpy(training_time).to(device)
-training_function_vals_torch = torch.from_numpy(training_function_vals).to(device)
-training_function_vals_torch_in = training_function_vals_torch.unsqueeze(dim=-1) # Add a dimension to the end, input_dim = 1
-forecast_time_samples_torch = total_time_samples_torch[50:]
-forecast_function_samples_torch = total_function_samples_torch[50:]
+
+input_time_points1, output_time_points1, ground_truth_input1, ground_truth_output1 = time_series_sampler.sample_time_series(1, device=device, min_samples=7)
+input_time_points1 = input_time_points1.squeeze(0)
+output_time_points1 = output_time_points1.squeeze(0)
+ground_truth_input1 = ground_truth_input1.squeeze(0)
+ground_truth_output1 = ground_truth_output1.squeeze(0)
 
 
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=1e-3)
+while True:
+    input_time_points2, output_time_points2, ground_truth_input2, ground_truth_output2 = time_series_sampler.sample_time_series(1, device=device, min_samples=7)
+    input_time_points2 = input_time_points2.squeeze(0)
+    output_time_points2 = output_time_points2.squeeze(0)
+    ground_truth_input2 = ground_truth_input2.squeeze(0)
+    ground_truth_output2 = ground_truth_output2.squeeze(0)
+
+    if torch.abs(ground_truth_output2[0] - ground_truth_output1[0]) > 0.2:
+        break
+
+
+input_time_points1_np = input_time_points1.cpu().numpy()
+output_time_points1_np = output_time_points1.cpu().numpy()
+ground_truth_input1_np = ground_truth_input1.cpu().numpy()
+ground_truth_output1_np = ground_truth_output1.cpu().numpy()
+input_time_points2_np = input_time_points2.cpu().numpy()
+output_time_points2_np = output_time_points2.cpu().numpy()
+ground_truth_input2_np = ground_truth_input2.cpu().numpy()
+ground_truth_output2_np = ground_truth_output2.cpu().numpy()
+
+plot1_tmin = np.min(input_time_points1_np)
+plot1_tmax = np.max(output_time_points1_np)
+plot2_tmin = np.min(input_time_points2_np)
+plot2_tmax = np.max(output_time_points2_np)
+
+
+optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=1e-4)
 
 def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
-    ax = ax[0, 0]
-    ax.clear()
-    ax.set_xlim(low, high)
-    ax.set_ylim(-1.5, 1.5)
-    ax.set_title("Encoder-Decoder. Epoch: {}".format(i))
-    ax.set_xlabel("t")
-    ax.set_ylabel("y")
+    low = -1.5
+    high = 1.5
+
+    ax[0].clear()
+    ax[0].set_xlim(plot1_tmin, plot1_tmax)
+    ax[0].set_ylim(low, high)
+    ax[0].set_xlabel("t")
+    ax[0].set_ylabel("y")
 
     # Plot ground truth t:total_time_samples, y:total_function_samples. color="red". label="Ground Truth"
-    ax.plot(total_time_samples, total_function_samples, color="red", label="Ground Truth")
+    ax[0].plot(output_time_points1_np, ground_truth_output1_np, color="red", label="Ground Truth")
 
-    # Scatter the encoder predictions t:training_time, y:training_function_vals. color="blue". label="Training samples"
-    ax.scatter(training_time, training_function_vals, color="blue", label="Training samples", s=30)
+    # Scatter the encoder predictions t:training_time, y:training_function_vals. color="blue". label="Irregular samples as input"
+    ax[0].scatter(input_time_points1_np, ground_truth_input1_np, color="blue", label="Irregular samples as input", s=30)
+
+
+    ax[1].clear()
+    ax[1].set_xlim(plot2_tmin, plot2_tmax)
+    ax[1].set_ylim(low, high)
+    ax[1].set_xlabel("t")
+    ax[1].set_ylabel("y")
+
+    # Plot ground truth t:total_time_samples, y:total_function_samples. color="red". label="Ground Truth"
+    ax[1].plot(output_time_points2_np, ground_truth_output2_np, color="red", label="Ground Truth")
+
+    # Scatter the encoder predictions t:training_time, y:training_function_vals. color="blue". label="Irregular samples as input"
+    ax[1].scatter(input_time_points2_np, ground_truth_input2_np, color="blue", label="Irregular samples as input", s=30)
 
     optimizer.zero_grad()
-    latent = encoder(training_time_torch, training_function_vals_torch_in)
-    prediction = decoder(forecast_time_samples_torch, latent_decoder(latent_encoder(latent))).squeeze(dim=-1)
-    assert prediction.shape == forecast_function_samples_torch.shape
+    batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(1000, device=device, min_samples=2)
 
-    time_diff = forecast_time_samples_torch - torch.min(forecast_time_samples_torch)
-    loss = (torch.abs(prediction - forecast_function_samples_torch) * torch.exp(-0.25 * time_diff)).mean()
+    assert batch_input_time_points.shape[0] == batch_ground_truth_input.shape[1]
+    assert batch_output_time_points.shape[0] == batch_ground_truth_output.shape[1]
+
+    latent = encoder(batch_input_time_points, batch_ground_truth_input.unsqueeze(-1).permute(1, 0, 2))
+    predictions = decoder(batch_output_time_points, latent).squeeze(dim=-1).permute(1, 0)
+
+    loss = (torch.abs(predictions - batch_ground_truth_output) * torch.exp(-0.25 * batch_output_time_points).unsqueeze(0)).mean()
     loss.backward()
     optimizer.step()
 
-    ax.plot(forecast_time_samples_torch.cpu().detach().numpy(), prediction.cpu().detach().numpy(), color="green", label="Decoder predictions")
-    ax.legend()
+    with torch.no_grad():
+        latent = encoder(input_time_points1, ground_truth_input1.unsqueeze(-1))
+        predictions = decoder(output_time_points1, latent).squeeze(dim=-1)
 
-plot_interactive(UpdateCallback(odernn_run_plot))
+        latent2 = encoder(input_time_points2, ground_truth_input2.unsqueeze(-1))
+        predictions2 = decoder(output_time_points2, latent2).squeeze(dim=-1)
+
+    ax[0].plot(output_time_points1_np, predictions.detach().cpu().numpy(), color="green", label="Predictions")
+    ax[1].plot(output_time_points2_np, predictions2.detach().cpu().numpy(), color="green", label="Predictions")
+
+    ax[0].set_title("Function 1. Epoch: {} Start pred: {}".format(i, predictions[0].item()))
+    ax[1].set_title("Function 2. Epoch: {} Start pred: {}".format(i, predictions2[0].item()))
+
+    for k in range(2):
+        ax[k].legend()
+
+ctime = time.time()
+plot_to_mp4("output.mp4", UpdateCallback(odernn_run_plot), frames=4900)
+print("Time taken: {}".format(time.time() - ctime))
 
 # Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
 torch.save(encoder.state_dict(), "encoder.pt")

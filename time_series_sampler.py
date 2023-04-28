@@ -3,7 +3,7 @@ import numpy as np
 import time
 
 def ground_truth_function(x):
-    return torch.sin(x)
+    return torch.sin(x) + 0.1
 
 samples_width = np.pi / 20
 low = -100
@@ -61,6 +61,9 @@ def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=
         ground_truth_values_after = ground_truth_function((mid_val.unsqueeze(-1) + after_samples) * msamples_width)
 
         # obstruct the ground_truth_values_before with the random mask.
-        ground_truth_values_before[before_samples_union] = torch.nan
+        ground_truth_values_before[torch.logical_not(before_samples_union)] = torch.nan
 
     return corresponding_values * msamples_width, after_samples * msamples_width, ground_truth_values_before, ground_truth_values_after
+
+if __name__ == "__main__":
+    print(sample_time_series(10))
