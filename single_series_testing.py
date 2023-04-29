@@ -21,7 +21,8 @@ parser.add_argument("--variational", action="store_true", help="Whether to use v
 parser.add_argument("--name", type=str, default="sine", help="Name (prefix) of output files.")
 # add string argument reduce-dims, with description "Whether to reduce the dimensionality of the latent space to 2." Default value False
 parser.add_argument("--reduce-dims", action="store_true", help="Whether to reduce the dimensionality of the latent space to 2.")
-
+# add float argument kl-loss-weight, with description "Weight of the KL loss term. Only used when --variational argument is present." Default value 0.1
+parser.add_argument("--kl-loss-weight", type=float, default=0.1, help="Weight of the KL loss term. Only used when --variational argument is present.")
 args = parser.parse_args()
 
 print("Using name:   {}".format(args.name))
@@ -29,8 +30,8 @@ print("Variational:  {}".format(args.variational))
 print("Reduce dims:  {}".format(args.reduce_dims))
 
 
-def plot_to_mp4(filename, update_callback, figsize=(19.2, 10.8), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
-    fig = plt.figure(figsize=(19.2, 10.8))
+def plot_to_mp4(filename, update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
+    fig = plt.figure(figsize=figsize)
     gs = gridspec.GridSpec(nrows=3, ncols=2, figure=fig)
 
     # Create the left subplot
@@ -47,8 +48,8 @@ def plot_to_mp4(filename, update_callback, figsize=(19.2, 10.8), frames=240, fps
     anim = animation.FuncAnimation(fig, update_callback, frames=frames)
     anim.save(filename, fps=fps, extra_args=extra_args)
 
-def plot_interactive(update_callback, figsize=(19.2, 10.8), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
-    fig = plt.figure(figsize=(19.2, 10.8))
+def plot_interactive(update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
+    fig = plt.figure(figsize=figsize)
     gs = gridspec.GridSpec(nrows=3, ncols=2, figure=fig)
 
     # Create the left subplot
@@ -78,13 +79,15 @@ class UpdateCallback:
     def __call__(self, i):
         self.plot_callback(i, self.fig, self.axs)
 
-encoder = encoder_ode_rnn.OdeRNN(4,
-                                 utils.ODEFuncWrapper(utils.feedforward_nn(4, 4, 64, 3, device=torch.device("cuda"))),
-                                 torch.nn.GRUCell(input_size=1, hidden_size=4), compute_variance=args.variational)
-decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(4, 4, 64, 3, device=torch.device("cuda"))), utils.feedforward_nn(4, 1, 64, 3, device=torch.device("cuda")))
-latent_encoder = torch.nn.Linear(4, 2, device=torch.device("cuda"))
-latent_decoder = torch.nn.Linear(2, 4, device=torch.device("cuda"))
-latent_variance_encoder = torch.nn.Linear(4, 2, device=torch.device("cuda"))
+latent_dims = 4
+gru_hidden_dims = latent_dims * 2 if args.variational else latent_dims
+encoder = encoder_ode_rnn.OdeRNN(latent_dims,
+                                 utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 64, 3, device=torch.device("cuda"))),
+                                 torch.nn.GRUCell(input_size=1, hidden_size=gru_hidden_dims), compute_variance=args.variational)
+decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 64, 3, device=torch.device("cuda"))), utils.feedforward_nn(latent_dims, 1, 64, 3, device=torch.device("cuda")))
+latent_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
+latent_decoder = torch.nn.Linear(2, latent_dims, device=torch.device("cuda"))
+latent_variance_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
 
 
 device = torch.device("cuda")
@@ -145,8 +148,8 @@ if args.variational:
     if args.reduce_dims:
         std_normal = torch.distributions.MultivariateNormal(loc=torch.zeros(2, device=device), covariance_matrix=torch.diag(torch.ones(2, device=device)))
     else:
-        std_normal = torch.distributions.MultivariateNormal(loc=torch.zeros(4, device=device), covariance_matrix=torch.diag(torch.ones(4, device=device)))
-
+        std_normal = torch.distributions.MultivariateNormal(loc=torch.zeros(latent_dims, device=device), covariance_matrix=torch.diag(torch.ones(latent_dims, device=device)))
+    kl_loss_weight = torch.tensor(args.kl_loss_weight, device=device)
 def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     global cbar, epoch
     low = -1.5
@@ -181,7 +184,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
             latent = (latent_encoder(latent[0]), latent_variance_encoder(latent[1]))
         distribution = torch.distributions.multivariate_normal.MultivariateNormal(loc=latent[0], covariance_matrix=torch.diag_embed(latent[1] ** 2))
         # compute kl_loss here
-        kl_loss = torch.distributions.kl_divergence(distribution, std_normal).mean() * 0.1
+        kl_loss = torch.distributions.kl_divergence(distribution, std_normal).mean() * kl_loss_weight
         # use reparameterization trick to sample from latent space
         latent = std_normal.rsample((batch_size,)) * latent[1] + latent[0]
 
@@ -218,6 +221,8 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
                 ax[j].plot(output_time_points_np[j], predictions[:, 0], color="green", label="Predictions")
                 ax[j].plot(output_time_points_np[j], predictions[:, 1:], color="yellow", label="VED Predictions")
+
+                ax[j].set_title("Function {}. Epoch: {} Start pred: {}".format(j, epoch, predictions[0, 0].item()))
             else:
                 if args.reduce_dims:
                     latent = latent_decoder(latent_encoder(latent))
@@ -225,7 +230,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
                 ax[j].plot(output_time_points_np[j], predictions.detach().cpu().numpy(), color="green", label="Predictions")
 
-            ax[j].set_title("Function {}. Epoch: {} Start pred: {}".format(j, epoch, predictions[0].item()))
+                ax[j].set_title("Function {}. Epoch: {} Start pred: {}".format(j, epoch, predictions[0].item()))
 
             ax[j].legend()
 
@@ -236,7 +241,10 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
         ax[3].clear()
 
-        scatter_points_num = 4100
+        if args.variational:
+            scatter_points_num = 205
+        else:
+            scatter_points_num = 4100
         mid_vals = torch.arange(-20, 21, device=device, dtype=torch.int).repeat_interleave(scatter_points_num // 41)
 
         batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(scatter_points_num, device=device, mid_val=mid_vals)
@@ -245,7 +253,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
         if args.reduce_dims:
             if args.variational:
                 embeddings = (latent_encoder(embeddings[0]), latent_variance_encoder(embeddings[1]))
-                random_embeddings = std_normal.rsample((scatter_points_num * 20,)) * embeddings[1].repeat_interleave(20) + embeddings[0].repeat_interleave(20)
+                random_embeddings = std_normal.rsample((scatter_points_num * 20,)) * embeddings[1].repeat_interleave(20, dim=0) + embeddings[0].repeat_interleave(20, dim=0)
                 embeddings = torch.cat([embeddings[0], random_embeddings], dim=0)
             else:
                 embeddings = latent_encoder(embeddings)
@@ -254,7 +262,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
             y = embeddings[:, 1].detach().cpu().numpy()
         else:
             if args.variational:
-                random_embeddings = std_normal.rsample((scatter_points_num * 20,)) * embeddings[1].repeat_interleave(20) + embeddings[0].repeat_interleave(20)
+                random_embeddings = std_normal.rsample((scatter_points_num * 20,)) * embeddings[1].repeat_interleave(20, dim=0) + embeddings[0].repeat_interleave(20, dim=0)
                 embeddings = torch.cat([embeddings[0], random_embeddings], dim=0)
             # compute PCA to reduce the embeddings to 2 dimensions.
             U, S, V = np.linalg.svd(embeddings.cpu().numpy())
@@ -264,18 +272,21 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
         if args.variational:
             color = torch.cat([color_values, color_values.repeat_interleave(20)], dim=0).detach().cpu().numpy()
-            sc = ax[3].scatter(x[:scatter_points_num], y[:scatter_points_num], c=color[:scatter_points_num],
-                               cmap="viridis",
-                               s=10)
             sc = ax[3].scatter(x[scatter_points_num:], y[scatter_points_num:], c=color[scatter_points_num:],
                                cmap="viridis",
                                s=2)
+            sc = ax[3].scatter(x[:scatter_points_num], y[:scatter_points_num], c=color[:scatter_points_num],
+                               cmap="viridis",
+                               s=15)
         else:
             color = color_values.detach().cpu().numpy()
             sc = ax[3].scatter(x, y, c=color, cmap="viridis")
         cbar = plt.colorbar(sc)
         cbar.set_label("Prediction start time")
-        ax[3].set_title("Embeddings")
+        if args.variational:
+            ax[3].set_title("Embeddings. Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+        else:
+            ax[3].set_title("Embeddings. Loss: {}".format(loss.item()))
 
     epoch += 1
 
