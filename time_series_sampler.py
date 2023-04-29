@@ -30,11 +30,14 @@ def create_mask_from_tensor(batch_size: int, m: int, lengths: torch.Tensor, indi
 
     return mask
 
-def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=40, device=torch.device("cuda")):
+def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=40, device=torch.device("cuda"), mid_val=None):
     with torch.no_grad():
         msamples_width = torch.tensor(samples_width, device=device)
 
-        mid_val = torch.randint(low=low, high=high, size=(batch_size,), device=device) # the (untransformed) time end of available data, i.e. the time at which the prediction should start
+        if mid_val is None:
+            mid_val = torch.randint(low=low, high=high, size=(batch_size,), device=device) # the (untransformed) time end of available data, i.e. the time at which the prediction should start
+        else:
+            assert mid_val.shape[0] == batch_size
 
         # randomly sample irregularly spaced time points before the mid_val
         # first generate increasing integer sequence

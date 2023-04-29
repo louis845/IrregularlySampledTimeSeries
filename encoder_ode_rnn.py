@@ -75,6 +75,20 @@ class OdeRNN(torch.nn.Module):
 
         initialized = torch.zeros(obs_x.shape[1:-1], device=obs_x.device, dtype=torch.bool)
 
+        # compute the initial step
+        initialized = mask[0, ...] | initialized
+        if self.compute_variance:
+            new_latent_state_mean, new_latent_state_variance = self.compute_gru(obs_x_imputed[0, ...],
+                                                                                latent_state_mean,
+                                                                                latent_state_variance)
+            latent_state_variance = torch.where(initialized.unsqueeze(-1), new_latent_state_variance,
+                                                latent_state_variance)
+        else:
+            new_latent_state_mean = self.compute_gru(obs_x_imputed[0, ...], latent_state_mean)
+
+        latent_state_mean = torch.where(initialized.unsqueeze(-1), new_latent_state_mean, latent_state_mean)
+
+
         # for each iteration, the latent_state is updated first with the ODE, then with the GRU. If the values of x is unknown, we do not use the GRU, which means that the ODE is continuously integrated.
         for iter in range(time_steps.shape[0] - 1):
             # use the ODE to forward the current latent states. only the mean should be updated, not the variance
@@ -89,11 +103,11 @@ class OdeRNN(torch.nn.Module):
             # first compute the result of the GRU cell with obs_x_imputed[iter, ...] as input
             if self.compute_variance:
                 new_latent_state_mean, new_latent_state_variance = self.compute_gru(obs_x_imputed[iter+1, ...], latent_state_mean, latent_state_variance)
-                latent_state_variance = torch.where(initialized.unsqueeze(-1), new_latent_state_variance, latent_state_variance)
+                latent_state_variance = torch.where(mask[iter+1, ...].unsqueeze(-1), new_latent_state_variance, latent_state_variance)
             else:
                 new_latent_state_mean = self.compute_gru(obs_x_imputed[iter+1, ...], latent_state_mean)
 
-            latent_state_mean = torch.where(initialized.unsqueeze(-1), new_latent_state_mean, latent_state_mean)
+            latent_state_mean = torch.where(mask[iter+1, ...].unsqueeze(-1), new_latent_state_mean, latent_state_mean)
 
         if self.compute_variance:
             return self.final_projection((latent_state_mean, latent_state_variance))

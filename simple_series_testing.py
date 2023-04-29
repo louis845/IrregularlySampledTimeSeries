@@ -63,8 +63,8 @@ encoder = encoder_ode_rnn.OdeRNN(4,
                                  utils.ODEFuncWrapper(utils.feedforward_nn(4, 4, 64, 3, device=torch.device("cuda"))),
                                  torch.nn.GRUCell(input_size=1, hidden_size=4))
 decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(4, 4, 64, 3, device=torch.device("cuda"))), utils.feedforward_nn(4, 1, 64, 3, device=torch.device("cuda")))
-latent_encoder = utils.feedforward_nn(4, 2, 64, 3, device=torch.device("cuda"), activation=torch.nn.ReLU)
-latent_decoder = utils.feedforward_nn(2, 4, 64, 3, device=torch.device("cuda"), activation=torch.nn.ReLU)
+latent_encoder = torch.nn.Linear(4, 2, device=torch.device("cuda"))
+latent_decoder = torch.nn.Linear(2, 4, device=torch.device("cuda"))
 
 
 device = torch.device("cuda")
@@ -134,18 +134,23 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     assert batch_output_time_points.shape[0] == batch_ground_truth_output.shape[1]
 
     latent = encoder(batch_input_time_points, batch_ground_truth_input.unsqueeze(-1).permute(1, 0, 2))
-    predictions = decoder(batch_output_time_points, latent).squeeze(dim=-1).permute(1, 0)
+    latent_new = latent_decoder(latent_encoder(latent))
+    predictions = decoder(batch_output_time_points, latent_new).squeeze(dim=-1).permute(1, 0)
 
     loss = (torch.abs(predictions - batch_ground_truth_output) * torch.exp(-0.25 * batch_output_time_points).unsqueeze(0)).mean()
+    #embedding_reconstruction_loss = torch.abs(latent - latent_new).mean()
+
     loss.backward()
     optimizer.step()
 
     with torch.no_grad():
         latent = encoder(input_time_points1, ground_truth_input1.unsqueeze(-1))
-        predictions = decoder(output_time_points1, latent).squeeze(dim=-1)
+        latent_new = latent_decoder(latent_encoder(latent))
+        predictions = decoder(output_time_points1, latent_new).squeeze(dim=-1)
 
         latent2 = encoder(input_time_points2, ground_truth_input2.unsqueeze(-1))
-        predictions2 = decoder(output_time_points2, latent2).squeeze(dim=-1)
+        latent2_new = latent_decoder(latent_encoder(latent2))
+        predictions2 = decoder(output_time_points2, latent2_new).squeeze(dim=-1)
 
     ax[0].plot(output_time_points1_np, predictions.detach().cpu().numpy(), color="green", label="Predictions")
     ax[1].plot(output_time_points2_np, predictions2.detach().cpu().numpy(), color="green", label="Predictions")
@@ -156,9 +161,9 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     print("---------------------------------")
     with torch.no_grad():
         print(latent, latent2)
-        print(latent_decoder(latent_encoder(latent)), latent_decoder(latent_encoder(latent2)))
+        print(latent_new, latent2_new)
 
     for k in range(2):
         ax[k].legend()
 
-plot_to_mp4("output.mp4", UpdateCallback(odernn_run_plot))
+plot_interactive(UpdateCallback(odernn_run_plot))

@@ -5,6 +5,7 @@ import torchdiffeq
 def feedforward_nn(input_dim, output_dim, hidden_dim, num_hidden_layers, activation = torch.nn.Tanh, device = torch.device("cpu")):
     # Create a list of layers, starting with the input layer.
     layers = [torch.nn.Linear(input_dim, hidden_dim)]
+    layers.append(activation())
 
     # Add num_hidden_layers hidden layers.
     for i in range(num_hidden_layers):
