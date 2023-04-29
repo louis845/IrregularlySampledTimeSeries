@@ -143,6 +143,7 @@ optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameter
 
 cbar = None
 epoch = 1
+ctime = time.time()
 
 if args.variational:
     if args.reduce_dims:
@@ -151,7 +152,7 @@ if args.variational:
         std_normal = torch.distributions.MultivariateNormal(loc=torch.zeros(latent_dims, device=device), covariance_matrix=torch.diag(torch.ones(latent_dims, device=device)))
     kl_loss_weight = torch.tensor(args.kl_loss_weight, device=device)
 def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
-    global cbar, epoch
+    global cbar, epoch, ctime
     low = -1.5
     high = 1.5
 
@@ -289,11 +290,15 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
             ax[3].set_title("Embeddings. Loss: {}".format(loss.item()))
 
     epoch += 1
+    if epoch % 1000 == 0:
+        ctime = time.time() - ctime
+        print("Epoch: {} Time taken: {}".format(epoch, ctime))
+        ctime = time.time()
 
 
 
 ctime = time.time()
-plot_to_mp4("{}_learning.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=600)
+plot_to_mp4("{}_learning.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=7200)
 print("Time taken: {}".format(time.time() - ctime))
 
 # Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
