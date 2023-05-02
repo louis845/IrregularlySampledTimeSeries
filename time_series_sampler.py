@@ -2,8 +2,31 @@ import torch
 import numpy as np
 import time
 
-def ground_truth_function(x):
+def sine_function(x):
     return torch.sin(x) + 0.1
+
+def sample_glucose(x, onset = 0.0, weight = 1.0, decay = 1.0):
+    xs = (x - 0.3) * decay / 0.4 - onset
+    return 1.2 * weight * torch.exp(-(xs ** 2)) * torch.sigmoid(-8 * xs)
+
+def sample_batch_glucose(x, onset, weight, decay):
+    """
+    Samples a batch of toy glucose values.
+    :param x: The x values. A torch tensor of (batch_size, time_vals)
+    :param onset: The onsets of the glucose spikes. A torch tensor of (batch_size, num_spikes)
+    :param weight: The heights of the glucose spikes. A torch tensor of (batch_size, num_spikes)
+    :param decay: The decay of the glucose spikes. A torch tensor of (batch_size)
+    :return: A torch tensor of (batch_size, time_vals)
+    """
+    assert len(x.shape) == 2
+    assert len(onset.shape) == 2
+    assert len(weight.shape) == 2
+    assert len(decay.shape) == 1
+
+    assert x.shape[0] == onset.shape[0] == weight.shape[0] == decay.shape[0]
+    assert onset.shape[1] == weight.shape[1]
+
+    return torch.sum(sample_glucose(x.unsqueeze(2), onset.unsqueeze(1), weight.unsqueeze(1), decay.unsqueeze(-1).unsqueeze(-1)), dim=2)
 
 samples_width = np.pi / 20
 low = -100
@@ -30,7 +53,13 @@ def create_mask_from_tensor(batch_size: int, m: int, lengths: torch.Tensor, indi
 
     return mask
 
-def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=40, device=torch.device("cuda"), mid_val=None):
+decay_values = None
+def setup_glucose_sampling(device=torch.device("cuda")):
+    global decay_values
+    decay_values = (torch.rand(size=(4,), device=device) * 0.2) + 1.0
+    print("decay_values:   ", decay_values)
+
+def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=40, device=torch.device("cuda"), mid_val=None, sampling_method="sine"):
     with torch.no_grad():
         msamples_width = torch.tensor(samples_width, device=device)
 
@@ -60,8 +89,23 @@ def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=
         after_samples = torch.arange(0, after_samples, device=device)
 
         # compute the ground truths for each batch
-        ground_truth_values_before = ground_truth_function((corresponding_values + mid_val.unsqueeze(-1)) * msamples_width)
-        ground_truth_values_after = ground_truth_function((mid_val.unsqueeze(-1) + after_samples) * msamples_width)
+        if sampling_method == "sine":
+            ground_truth_values_before = sine_function((corresponding_values + mid_val.unsqueeze(-1)) * msamples_width)
+            ground_truth_values_after = sine_function((mid_val.unsqueeze(-1) + after_samples) * msamples_width)
+        elif sampling_method == "glucose":
+            onset = torch.rand(size=(batch_size, 4), device=device)
+            onset[:, 0] = -(onset[:, 0] + onset[:, 1] - 0.6)
+            onset[:, 1] = -onset[:, 1] - 0.2
+            onset[:, 2] = onset[:, 2] + 0.2
+            onset[:, 3] = onset[:, 2] + onset[:, 3] + 0.6
+
+            weight = torch.rand(size=(batch_size, 4), device=device) * 0.2 + 1.0
+            decay = decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
+
+            ground_truth_values_before = sample_batch_glucose((corresponding_values + mid_val.unsqueeze(-1)) * msamples_width, onset, weight, decay)
+            ground_truth_values_after = sample_batch_glucose((mid_val.unsqueeze(-1) + after_samples) * msamples_width, onset, weight, decay)
+        else:
+            raise ValueError("Unknown sampling method {}".format(sampling_method))
 
         # obstruct the ground_truth_values_before with the random mask.
         ground_truth_values_before[torch.logical_not(before_samples_union)] = torch.nan

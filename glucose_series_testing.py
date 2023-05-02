@@ -18,16 +18,18 @@ parser = argparse.ArgumentParser(description="Train an ODE-RNN on a time series.
 # add boolean argument variational, with description "Whether to use variational encoder decoder, or just plain encoder decoder." Default value False
 parser.add_argument("--variational", action="store_true", help="Whether to use variational encoder decoder, or just plain encoder decoder.")
 # add string argument name, with description "Name (prefix) of output files." Default value "sine"
-parser.add_argument("--name", type=str, default="sine", help="Name (prefix) of output files.")
+parser.add_argument("--name", type=str, default="glucose", help="Name (prefix) of output files.")
 # add string argument reduce-dims, with description "Whether to reduce the dimensionality of the latent space to 2." Default value False
 parser.add_argument("--reduce-dims", action="store_true", help="Whether to reduce the dimensionality of the latent space to 2.")
 # add float argument kl-loss-weight, with description "Weight of the KL loss term. Only used when --variational argument is present." Default value 0.1
-parser.add_argument("--kl-loss-weight", type=float, default=0.1, help="Weight of the KL loss term. Only used when --variational argument is present.")
+parser.add_argument("--kl-loss-weight", type=float, default=0.01, help="Weight of the KL loss term. Only used when --variational argument is present.")
 args = parser.parse_args()
 
 print("Using name:   {}".format(args.name))
 print("Variational:  {}".format(args.variational))
 print("Reduce dims:  {}".format(args.reduce_dims))
+print("KL weight:    {}".format(args.kl_loss_weight))
+print("-----------------------------------")
 
 
 def plot_to_mp4(filename, update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
@@ -79,7 +81,12 @@ class UpdateCallback:
     def __call__(self, i):
         self.plot_callback(i, self.fig, self.axs)
 
-latent_dims = 4
+time_series_sampler.setup_glucose_sampling()
+time_series_sampler.low = -30
+time_series_sampler.high = 30
+time_series_sampler.samples_width = 1.0 / 20
+
+latent_dims = 64
 gru_hidden_dims = latent_dims * 2 if args.variational else latent_dims
 encoder = encoder_ode_rnn.OdeRNN(latent_dims,
                                  utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 64, 3, device=torch.device("cuda"))),
@@ -102,7 +109,7 @@ output_time_points = np.empty((n,), dtype="object")
 ground_truth_input = np.empty((n,), dtype="object")
 ground_truth_output = np.empty((n,), dtype="object")
 
-input_time_points[0], output_time_points[0], ground_truth_input[0], ground_truth_output[0] = time_series_sampler.sample_time_series(1, device=device, min_samples=7)
+input_time_points[0], output_time_points[0], ground_truth_input[0], ground_truth_output[0] = time_series_sampler.sample_time_series(1, device=device, min_samples=7, sampling_method="glucose")
 input_time_points[0] = input_time_points[0].squeeze(0)
 output_time_points[0] = output_time_points[0].squeeze(0)
 ground_truth_input[0] = ground_truth_input[0].squeeze(0)
@@ -110,7 +117,7 @@ ground_truth_output[0] = ground_truth_output[0].squeeze(0)
 
 i = 1
 while i < n:
-    input_time_points[i], output_time_points[i], ground_truth_input[i], ground_truth_output[i] = time_series_sampler.sample_time_series(1, device=device, min_samples=7)
+    input_time_points[i], output_time_points[i], ground_truth_input[i], ground_truth_output[i] = time_series_sampler.sample_time_series(1, device=device, min_samples=7, sampling_method="glucose")
     input_time_points[i] = input_time_points[i].squeeze(0)
     output_time_points[i] = output_time_points[i].squeeze(0)
     ground_truth_input[i] = ground_truth_input[i].squeeze(0)
@@ -151,10 +158,11 @@ if args.variational:
     else:
         std_normal = torch.distributions.MultivariateNormal(loc=torch.zeros(latent_dims, device=device), covariance_matrix=torch.diag(torch.ones(latent_dims, device=device)))
     kl_loss_weight = torch.tensor(args.kl_loss_weight, device=device)
+
 def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     global cbar, epoch, ctime
-    low = -1.5
-    high = 1.5
+    low = -1
+    high = 5
 
     for j in range(n):
         ax[j].clear()
@@ -172,7 +180,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     optimizer.zero_grad()
     # sample the time series from time_series_sampler
     batch_size = 5000
-    batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(batch_size, device=device, min_samples=2, sampling_method="sine")
+    batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(batch_size, device=device, min_samples=2, sampling_method="glucose")
 
     assert batch_input_time_points.shape[0] == batch_ground_truth_input.shape[1]
     assert batch_output_time_points.shape[0] == batch_ground_truth_output.shape[1]
@@ -248,8 +256,8 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
             scatter_points_num = 4100
         mid_vals = torch.arange(-20, 21, device=device, dtype=torch.int).repeat_interleave(scatter_points_num // 41)
 
-        batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(scatter_points_num, device=device, mid_val=mid_vals)
-        color_values = mid_vals * time_series_sampler.samples_width
+        batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(scatter_points_num, device=device, mid_val=mid_vals, sampling_method="glucose")
+        color_values = batch_ground_truth_input[:, 0]
         embeddings = encoder(batch_input_time_points, batch_ground_truth_input.unsqueeze(-1).permute(1, 0, 2))
         if args.reduce_dims:
             if args.variational:
@@ -283,11 +291,17 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
             color = color_values.detach().cpu().numpy()
             sc = ax[3].scatter(x, y, c=color, cmap="viridis")
         cbar = plt.colorbar(sc)
-        cbar.set_label("Prediction start time")
+        cbar.set_label("Glucose level at prediction")
         if args.variational:
-            ax[3].set_title("Embeddings. Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+            if args.reduce_dims:
+                ax[3].set_title("Embeddings. Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+            else:
+                ax[3].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
         else:
-            ax[3].set_title("Embeddings. Loss: {}".format(loss.item()))
+            if args.reduce_dims:
+                ax[3].set_title("Embeddings. Loss: {}".format(loss.item()))
+            else:
+                ax[3].set_title("Embeddings (PCA). Loss: {}".format(loss.item()))
 
     epoch += 1
     if epoch % 1000 == 0:
@@ -298,7 +312,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
 
 ctime = time.time()
-plot_to_mp4("{}_learning.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=3000)
+plot_to_mp4("{}.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=2400)
 print("Time taken: {}".format(time.time() - ctime))
 
 # Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
