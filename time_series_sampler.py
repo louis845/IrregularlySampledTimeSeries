@@ -66,7 +66,7 @@ def generate_glucose_spikes(batch_size, device=torch.device("cuda")):
     onset[:, 2] = onset[:, 2] + 0.5
     onset[:, 3] = onset[:, 2] + onset[:, 3] + 1.5
 
-    weight = torch.rand(size=(batch_size, 4), device=device) * 1.5 + 0.5
+    weight = torch.rand(size=(batch_size, 4), device=device) * 0.5 + 1.5
     decay = decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
     return onset, weight, decay
 

@@ -18,4 +18,4 @@ class Decoder(torch.nn.Module):
         :param latent_variables: The latent variables to use for the prediction. Should be a tensor of shape (..., latent_dims).
         :return: A tensor containing the predicted values (states). This would be a tensor of shape (len(time_steps_prediction), ..., time_series_dims).
         """
-        return self.projector(torchdiffeq.odeint_adjoint(self.ode_func, latent_variables, time_steps_prediction, rtol=1e-2, atol=1e-4))
+        return self.projector(torchdiffeq.odeint_adjoint(self.ode_func, latent_variables, time_steps_prediction, rtol=1e-3, atol=1e-5))

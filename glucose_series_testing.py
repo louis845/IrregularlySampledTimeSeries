@@ -4,6 +4,7 @@ import argparse
 import matplotlib.figure
 import numpy as np
 import torch
+import torch.optim.lr_scheduler
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.gridspec as gridspec
@@ -52,17 +53,20 @@ def plot_to_mp4(filename, update_callback, figsize=(25.6, 14.4), frames=240, fps
 
 def plot_interactive(update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
     fig = plt.figure(figsize=figsize)
-    gs = gridspec.GridSpec(nrows=3, ncols=2, figure=fig)
+    gs = gridspec.GridSpec(nrows=5, ncols=3, figure=fig)
 
     # Create the left subplot
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax2 = fig.add_subplot(gs[1, 0])
-    ax3 = fig.add_subplot(gs[2, 0])
+    col1 = []
+    for k in range(5):
+        col1.append(fig.add_subplot(gs[k, 0]))
+    col2 = []
+    for k in range(5):
+        col2.append(fig.add_subplot(gs[k, 1]))
 
     # Create the right subplot
-    ax4 = fig.add_subplot(gs[:, 1])
+    ax_final = fig.add_subplot(gs[:, 2])
     fig.subplots_adjust(hspace=0.5)
-    update_callback.set_renderers(fig, [ax1, ax2, ax3, ax4])
+    update_callback.set_renderers(fig, col1 + col2 + [ax_final])
 
     # Create the animation
     anim = animation.FuncAnimation(fig, update_callback, frames=frames)
@@ -82,11 +86,11 @@ class UpdateCallback:
         self.plot_callback(i, self.fig, self.axs)
 
 time_series_sampler.setup_glucose_sampling()
-time_series_sampler.low = -40
-time_series_sampler.high = 60
-time_series_sampler.samples_width = 1.0 / 20
+time_series_sampler.low = -160
+time_series_sampler.high = 240
+time_series_sampler.samples_width = 1.0 / 80
 
-latent_dims = 64
+latent_dims = 32
 gru_hidden_dims = latent_dims * 2 if args.variational else latent_dims
 encoder = encoder_ode_rnn.OdeRNN(latent_dims,
                                  utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 64, 3, device=torch.device("cuda"))),
@@ -102,51 +106,68 @@ encoder = encoder.to(device)
 decoder = decoder.to(device)
 
 
-n = 3
+n = 10
 
-input_time_points = np.empty((n,), dtype="object")
-output_time_points = np.empty((n,), dtype="object")
-ground_truth_input = np.empty((n,), dtype="object")
-ground_truth_output = np.empty((n,), dtype="object")
+input_time_points, output_time_points, ground_truth_input, ground_truth_output = None, None, None, None
+input_time_points_np, output_time_points_np, ground_truth_input_np, ground_truth_output_np = None, None, None, None
+plot_tmin, plot_tmax = None, None
 
-input_time_points[0], output_time_points[0], ground_truth_input[0], ground_truth_output[0] = time_series_sampler.sample_time_series(1, device=device, min_samples=4, max_samples=20, sampling_method="glucose")
-input_time_points[0] = input_time_points[0].squeeze(0)
-output_time_points[0] = output_time_points[0].squeeze(0)
-ground_truth_input[0] = ground_truth_input[0].squeeze(0)
-ground_truth_output[0] = ground_truth_output[0].squeeze(0)
+def initialize_display_series():
+    global input_time_points, output_time_points, ground_truth_input, ground_truth_output
+    global input_time_points_np, output_time_points_np, ground_truth_input_np, ground_truth_output_np
+    global plot_tmin, plot_tmax
 
-i = 1
-while i < n:
-    input_time_points[i], output_time_points[i], ground_truth_input[i], ground_truth_output[i] = time_series_sampler.sample_time_series(1, device=device, min_samples=4, max_samples=20, sampling_method="glucose")
-    input_time_points[i] = input_time_points[i].squeeze(0)
-    output_time_points[i] = output_time_points[i].squeeze(0)
-    ground_truth_input[i] = ground_truth_input[i].squeeze(0)
-    ground_truth_output[i] = ground_truth_output[i].squeeze(0)
+    if input_time_points is not None:
+        del input_time_points, output_time_points, ground_truth_input, ground_truth_output
+    if input_time_points_np is not None:
+        del input_time_points_np, output_time_points_np, ground_truth_input_np, ground_truth_output_np
+    if plot_tmin is not None:
+        del plot_tmin, plot_tmax
 
-    if torch.abs(ground_truth_output[i][0] - ground_truth_output[i-1][0]) > 0.2:
-        i += 1
+    input_time_points = np.empty((n,), dtype="object")
+    output_time_points = np.empty((n,), dtype="object")
+    ground_truth_input = np.empty((n,), dtype="object")
+    ground_truth_output = np.empty((n,), dtype="object")
 
-input_time_points_np = np.empty((n,), dtype="object")
-output_time_points_np = np.empty((n,), dtype="object")
-ground_truth_input_np = np.empty((n,), dtype="object")
-ground_truth_output_np = np.empty((n,), dtype="object")
+    input_time_points[0], output_time_points[0], ground_truth_input[0], ground_truth_output[0] = time_series_sampler.sample_time_series(1, device=device, min_samples=4, max_samples=10, after_samples=80, sampling_method="glucose")
+    input_time_points[0] = input_time_points[0].squeeze(0)
+    output_time_points[0] = output_time_points[0].squeeze(0)
+    ground_truth_input[0] = ground_truth_input[0].squeeze(0)
+    ground_truth_output[0] = ground_truth_output[0].squeeze(0)
 
-for i in range(n):
-    input_time_points_np[i] = input_time_points[i].cpu().numpy()
-    output_time_points_np[i] = output_time_points[i].cpu().numpy()
-    ground_truth_input_np[i] = ground_truth_input[i].cpu().numpy()
-    ground_truth_output_np[i] = ground_truth_output[i].cpu().numpy()
+    i = 1
+    while i < n:
+        input_time_points[i], output_time_points[i], ground_truth_input[i], ground_truth_output[i] = time_series_sampler.sample_time_series(1, device=device, min_samples=4, max_samples=10, after_samples=80, sampling_method="glucose")
+        input_time_points[i] = input_time_points[i].squeeze(0)
+        output_time_points[i] = output_time_points[i].squeeze(0)
+        ground_truth_input[i] = ground_truth_input[i].squeeze(0)
+        ground_truth_output[i] = ground_truth_output[i].squeeze(0)
 
-plot_tmin = np.empty((n,), dtype="object")
-plot_tmax = np.empty((n,), dtype="object")
+        if torch.abs(ground_truth_output[i][0] - ground_truth_output[i-1][0]) > 0.2:
+            i += 1
 
-# Compute the plot limits
-for i in range(n):
-    plot_tmin[i] = np.min(input_time_points_np[i])
-    plot_tmax[i] = np.max(output_time_points_np[i])
+    input_time_points_np = np.empty((n,), dtype="object")
+    output_time_points_np = np.empty((n,), dtype="object")
+    ground_truth_input_np = np.empty((n,), dtype="object")
+    ground_truth_output_np = np.empty((n,), dtype="object")
+
+    for i in range(n):
+        input_time_points_np[i] = input_time_points[i].cpu().numpy()
+        output_time_points_np[i] = output_time_points[i].cpu().numpy()
+        ground_truth_input_np[i] = ground_truth_input[i].cpu().numpy()
+        ground_truth_output_np[i] = ground_truth_output[i].cpu().numpy()
+
+    plot_tmin = np.empty((n,), dtype="object")
+    plot_tmax = np.empty((n,), dtype="object")
+
+    # Compute the plot limits
+    for i in range(n):
+        plot_tmin[i] = np.min(input_time_points_np[i])
+        plot_tmax[i] = np.max(output_time_points_np[i])
 
 
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=1e-3)
+optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=3e-4)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=100, eta_min=1e-5)
 
 cbar = None
 epoch = 1
@@ -159,10 +180,16 @@ if args.variational:
         std_normal = torch.distributions.MultivariateNormal(loc=torch.zeros(latent_dims, device=device), covariance_matrix=torch.diag(torch.ones(latent_dims, device=device)))
     kl_loss_weight = torch.tensor(args.kl_loss_weight, device=device)
 
+initialize_display_series()
+
 def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     global cbar, epoch, ctime
     low = -1
     high = 5
+
+    if epoch > 100:
+        if epoch % 2 == 0:
+            initialize_display_series()
 
     for j in range(n):
         ax[j].clear()
@@ -180,7 +207,8 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     optimizer.zero_grad()
     # sample the time series from time_series_sampler
     batch_size = 5000
-    batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(batch_size, device=device, min_samples=2, sampling_method="glucose")
+    batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output =\
+        time_series_sampler.sample_time_series(batch_size, device=device, min_samples=4, max_samples=10, after_samples=80, sampling_method="glucose")
 
     assert batch_input_time_points.shape[0] == batch_ground_truth_input.shape[1]
     assert batch_output_time_points.shape[0] == batch_ground_truth_output.shape[1]
@@ -205,13 +233,14 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     # do predictions here
     predictions = decoder(batch_output_time_points, latent).squeeze(dim=-1).permute(1, 0)
 
-    loss = (torch.abs(predictions - batch_ground_truth_output) * torch.exp(-0.25 * batch_output_time_points).unsqueeze(0)).mean()
+    loss = (torch.abs(predictions - batch_ground_truth_output) * torch.exp(-batch_output_time_points).unsqueeze(0)).mean()
 
     if args.variational:
         (loss + kl_loss).backward()
     else:
         loss.backward()
     optimizer.step()
+    scheduler.step()
 
     # plot predicted values
     with torch.no_grad():
@@ -248,16 +277,18 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
         if cbar is not None:
             cbar.remove()
 
-        ax[3].clear()
+        ax[n].clear()
 
         if args.variational:
             scatter_points_num = 205
         else:
             scatter_points_num = 4100
-        mid_vals = torch.arange(-20, 21, device=device, dtype=torch.int).repeat_interleave(scatter_points_num // 41)
+        mid_vals = torch.randint(low=time_series_sampler.low, high=time_series_sampler.high, size=(scatter_points_num,), device=device)
 
-        batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = time_series_sampler.sample_time_series(scatter_points_num, device=device, mid_val=mid_vals, sampling_method="glucose")
+        batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = \
+            time_series_sampler.sample_time_series(scatter_points_num, device=device, mid_val=mid_vals, min_samples=4, max_samples=10, after_samples=80, sampling_method="glucose")
         color_values = batch_ground_truth_input[:, 0]
+
         embeddings = encoder(batch_input_time_points, batch_ground_truth_input.unsqueeze(-1).permute(1, 0, 2))
         if args.reduce_dims:
             if args.variational:
@@ -274,6 +305,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
                 random_embeddings = std_normal.rsample((scatter_points_num * 20,)) * embeddings[1].repeat_interleave(20, dim=0) + embeddings[0].repeat_interleave(20, dim=0)
                 embeddings = torch.cat([embeddings[0], random_embeddings], dim=0)
             # compute PCA to reduce the embeddings to 2 dimensions.
+            embeddings = embeddings - embeddings.mean(dim=0)
             U, S, V = np.linalg.svd(embeddings.cpu().numpy())
             embeddings = np.matmul(embeddings.cpu().numpy(), V[:, :2])
             x = embeddings[:, 0]
@@ -281,27 +313,30 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
         if args.variational:
             color = torch.cat([color_values, color_values.repeat_interleave(20)], dim=0).detach().cpu().numpy()
-            sc = ax[3].scatter(x[scatter_points_num:], y[scatter_points_num:], c=color[scatter_points_num:],
+            sc = ax[n].scatter(x[scatter_points_num:], y[scatter_points_num:], c=color[scatter_points_num:],
                                cmap="viridis",
                                s=2)
-            sc = ax[3].scatter(x[:scatter_points_num], y[:scatter_points_num], c=color[:scatter_points_num],
+            sc = ax[n].scatter(x[:scatter_points_num], y[:scatter_points_num], c=color[:scatter_points_num],
                                cmap="viridis",
                                s=15)
         else:
             color = color_values.detach().cpu().numpy()
-            sc = ax[3].scatter(x, y, c=color, cmap="viridis")
+            sc = ax[n].scatter(x, y, c=color, cmap="viridis")
+        ax[n].set_xlim(np.min(x), np.max(x))
+        ax[n].set_ylim(np.min(y), np.max(y))
+
         cbar = plt.colorbar(sc)
         cbar.set_label("Glucose level at prediction")
         if args.variational:
             if args.reduce_dims:
-                ax[3].set_title("Embeddings. Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+                ax[n].set_title("Embeddings. Loss: {}   KL_loss: {}   LR: {}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()))
             else:
-                ax[3].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+                ax[n].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}   LR: {}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()))
         else:
             if args.reduce_dims:
-                ax[3].set_title("Embeddings. Loss: {}".format(loss.item()))
+                ax[n].set_title("Embeddings. Loss: {}   LR: {}".format(loss.item(), scheduler.get_last_lr()))
             else:
-                ax[3].set_title("Embeddings (PCA). Loss: {}".format(loss.item()))
+                ax[n].set_title("Embeddings (PCA). Loss: {}   LR: {}".format(loss.item(), scheduler.get_last_lr()))
 
     epoch += 1
     if epoch % 1000 == 0:
