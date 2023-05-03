@@ -51,8 +51,8 @@ class UpdateCallback:
         self.plot_callback(i, self.fig, self.axs)
 
 time_series_sampler.setup_glucose_sampling()
-time_series_sampler.low = -30
-time_series_sampler.high = 30
+time_series_sampler.low = -40
+time_series_sampler.high = 60
 time_series_sampler.samples_width = 1.0 / 20
 
 device = torch.device("cuda")
@@ -74,7 +74,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     ground_truth_output = np.empty((n,), dtype="object")
 
     input_time_points[0], output_time_points[0], ground_truth_input[0], ground_truth_output[
-        0] = time_series_sampler.sample_time_series(1, device=device, min_samples=7, sampling_method="glucose")
+        0] = time_series_sampler.sample_time_series(1, device=device, min_samples=4, max_samples=20, sampling_method="glucose")
     input_time_points[0] = input_time_points[0].squeeze(0)
     output_time_points[0] = output_time_points[0].squeeze(0)
     ground_truth_input[0] = ground_truth_input[0].squeeze(0)
@@ -83,7 +83,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     i = 1
     while i < n:
         input_time_points[i], output_time_points[i], ground_truth_input[i], ground_truth_output[
-            i] = time_series_sampler.sample_time_series(1, device=device, min_samples=7, sampling_method="glucose")
+            i] = time_series_sampler.sample_time_series(1, device=device, min_samples=4, max_samples=20, sampling_method="glucose")
         input_time_points[i] = input_time_points[i].squeeze(0)
         output_time_points[i] = output_time_points[i].squeeze(0)
         ground_truth_input[i] = ground_truth_input[i].squeeze(0)
