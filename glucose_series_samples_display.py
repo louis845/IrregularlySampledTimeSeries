@@ -126,14 +126,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
     # Plot directly sampled (without sparse sampling or shifting) glucose time series.
     batch_size = n
-    onset = torch.rand(size=(batch_size, 4), device=device)
-    onset[:, 0] = -(onset[:, 0] + onset[:, 1] - 0.6)
-    onset[:, 1] = -onset[:, 1] - 0.2
-    onset[:, 2] = onset[:, 2] + 0.2
-    onset[:, 3] = onset[:, 2] + onset[:, 3] + 0.6
-
-    weight = torch.rand(size=(batch_size, 4), device=device) * 0.2 + 1.0
-    decay = time_series_sampler.decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
+    onset, weight, decay = time_series_sampler.generate_glucose_spikes(batch_size, device=device)
 
     time = torch.linspace(-3.0, 3.0, 1000, device=device)
 

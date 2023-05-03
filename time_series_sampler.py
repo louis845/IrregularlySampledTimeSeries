@@ -7,7 +7,7 @@ def sine_function(x):
 
 def sample_glucose(x, onset = 0.0, weight = 1.0, decay = 1.0):
     xs = (x - 0.3) * decay / 0.4 - onset
-    return 1.2 * weight * torch.exp(-(xs ** 2)) * torch.sigmoid(-8 * xs)
+    return 1.2 * weight * torch.exp(-(xs ** 2)) * torch.sigmoid(8 * xs)
 
 def sample_batch_glucose(x, onset, weight, decay):
     """
@@ -59,6 +59,17 @@ def setup_glucose_sampling(device=torch.device("cuda")):
     decay_values = (torch.rand(size=(4,), device=device) * 0.2) + 1.0
     print("decay_values:   ", decay_values)
 
+def generate_glucose_spikes(batch_size, device=torch.device("cuda")):
+    onset = torch.rand(size=(batch_size, 4), device=device) * 2
+    onset[:, 0] = -(onset[:, 0] + onset[:, 1] + 1.5)
+    onset[:, 1] = -onset[:, 1] - 0.5
+    onset[:, 2] = onset[:, 2] + 0.5
+    onset[:, 3] = onset[:, 2] + onset[:, 3] + 1.5
+
+    weight = torch.rand(size=(batch_size, 4), device=device) * 1.5 + 0.5
+    decay = decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
+    return onset, weight, decay
+
 def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=40, device=torch.device("cuda"), mid_val=None, sampling_method="sine"):
     with torch.no_grad():
         msamples_width = torch.tensor(samples_width, device=device)
@@ -93,14 +104,7 @@ def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=
             ground_truth_values_before = sine_function((corresponding_values + mid_val.unsqueeze(-1)) * msamples_width)
             ground_truth_values_after = sine_function((mid_val.unsqueeze(-1) + after_samples) * msamples_width)
         elif sampling_method == "glucose":
-            onset = torch.rand(size=(batch_size, 4), device=device)
-            onset[:, 0] = -(onset[:, 0] + onset[:, 1] - 0.6)
-            onset[:, 1] = -onset[:, 1] - 0.2
-            onset[:, 2] = onset[:, 2] + 0.2
-            onset[:, 3] = onset[:, 2] + onset[:, 3] + 0.6
-
-            weight = torch.rand(size=(batch_size, 4), device=device) * 0.2 + 1.0
-            decay = decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
+            onset, weight, decay = generate_glucose_spikes(batch_size, device=device)
 
             ground_truth_values_before = sample_batch_glucose((corresponding_values + mid_val.unsqueeze(-1)) * msamples_width, onset, weight, decay)
             ground_truth_values_after = sample_batch_glucose((mid_val.unsqueeze(-1) + after_samples) * msamples_width, onset, weight, decay)
