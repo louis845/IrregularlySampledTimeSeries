@@ -6,8 +6,8 @@ def sine_function(x):
     return torch.sin(x) + 0.1
 
 def sample_glucose(x, onset = 0.0, weight = 1.0, decay = 1.0):
-    xs = (x - 0.3) * decay / 0.4 - onset
-    return 1.2 * weight * torch.exp(-(xs ** 2)) * torch.sigmoid(8 * xs)
+    xs = (x - onset) / 0.4
+    return 1.2 * weight * torch.exp(-(decay ** 2) * (xs ** 2)) * torch.sigmoid(8 * xs)
 
 def sample_batch_glucose(x, onset, weight, decay):
     """
@@ -56,16 +56,16 @@ def create_mask_from_tensor(batch_size: int, m: int, lengths: torch.Tensor, indi
 decay_values = None
 def setup_glucose_sampling(device=torch.device("cuda")):
     global decay_values
-    #decay_values = (torch.rand(size=(4,), device=device) * 0.2) + 1.0
-    decay_values = torch.tensor([1.0515, 1.1733, 1.0265, 1.0005], device=device)
+    decay_values = (torch.rand(size=(4,), device=device) * 0.4) + 0.7
+    # decay_values = torch.tensor([1.0515, 1.1733, 1.0265, 1.0005], device=device)
     print("decay_values:   ", decay_values)
 
 def generate_glucose_spikes(batch_size, device=torch.device("cuda")):
-    onset = torch.rand(size=(batch_size, 4), device=device) * 2
-    onset[:, 0] = -(onset[:, 0] + onset[:, 1] + 1.5)
-    onset[:, 1] = -onset[:, 1] - 0.5
-    onset[:, 2] = onset[:, 2] + 0.5
-    onset[:, 3] = onset[:, 2] + onset[:, 3] + 1.5
+    onset = torch.rand(size=(batch_size, 4), device=device)
+    onset[:, 0] = -(onset[:, 0] + onset[:, 1] + 0.6)
+    onset[:, 1] = -onset[:, 1] - 0.2
+    onset[:, 2] = onset[:, 2] + 0.2
+    onset[:, 3] = onset[:, 2] + onset[:, 3] + 0.6
 
     weight = torch.rand(size=(batch_size, 4), device=device) * 0.5 + 1.5
     decay = decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
