@@ -56,7 +56,8 @@ def create_mask_from_tensor(batch_size: int, m: int, lengths: torch.Tensor, indi
 decay_values = None
 def setup_glucose_sampling(device=torch.device("cuda")):
     global decay_values
-    decay_values = (torch.rand(size=(4,), device=device) * 0.2) + 1.0
+    #decay_values = (torch.rand(size=(4,), device=device) * 0.2) + 1.0
+    decay_values = torch.tensor([1.0515, 1.1733, 1.0265, 1.0005], device=device)
     print("decay_values:   ", decay_values)
 
 def generate_glucose_spikes(batch_size, device=torch.device("cuda")):

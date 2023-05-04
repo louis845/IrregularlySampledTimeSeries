@@ -35,23 +35,26 @@ print("-----------------------------------")
 
 def plot_to_mp4(filename, update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
     fig = plt.figure(figsize=figsize)
-    gs = gridspec.GridSpec(nrows=3, ncols=2, figure=fig)
+    gs = gridspec.GridSpec(nrows=5, ncols=3, figure=fig)
 
     # Create the left subplot
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax2 = fig.add_subplot(gs[1, 0])
-    ax3 = fig.add_subplot(gs[2, 0])
+    col1 = []
+    for k in range(5):
+        col1.append(fig.add_subplot(gs[k, 0]))
+    col2 = []
+    for k in range(5):
+        col2.append(fig.add_subplot(gs[k, 1]))
 
     # Create the right subplot
-    ax4 = fig.add_subplot(gs[:, 1])
+    ax_final = fig.add_subplot(gs[:, 2])
     fig.subplots_adjust(hspace=0.5)
-    update_callback.set_renderers(fig, [ax1, ax2, ax3, ax4])
+    update_callback.set_renderers(fig, col1 + col2 + [ax_final])
 
     # Create the animation
     anim = animation.FuncAnimation(fig, update_callback, frames=frames)
     anim.save(filename, fps=fps, extra_args=extra_args)
 
-def plot_interactive(update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
+def plot_interactive(titlename, update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
     fig = plt.figure(figsize=figsize)
     gs = gridspec.GridSpec(nrows=5, ncols=3, figure=fig)
 
@@ -93,9 +96,9 @@ time_series_sampler.samples_width = 1.0 / 80
 latent_dims = 32
 gru_hidden_dims = latent_dims * 2 if args.variational else latent_dims
 encoder = encoder_ode_rnn.OdeRNN(latent_dims,
-                                 utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 64, 3, device=torch.device("cuda"))),
+                                 utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 128, 3, device=torch.device("cuda"))),
                                  torch.nn.GRUCell(input_size=1, hidden_size=gru_hidden_dims), compute_variance=args.variational)
-decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 64, 3, device=torch.device("cuda"))), utils.feedforward_nn(latent_dims, 1, 64, 3, device=torch.device("cuda")))
+decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims, latent_dims, 128, 3, device=torch.device("cuda"))), utils.feedforward_nn(latent_dims, 1, 128, 3, device=torch.device("cuda")))
 latent_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
 latent_decoder = torch.nn.Linear(2, latent_dims, device=torch.device("cuda"))
 latent_variance_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
@@ -104,6 +107,12 @@ latent_variance_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("c
 device = torch.device("cuda")
 encoder = encoder.to(device)
 decoder = decoder.to(device)
+
+"""encoder.load_state_dict(torch.load("encoder_{}.pt".format(args.name)))
+decoder.load_state_dict(torch.load("decoder_{}.pt".format(args.name)))
+latent_encoder.load_state_dict(torch.load("latent_encoder_{}.pt".format(args.name)))
+latent_decoder.load_state_dict(torch.load("latent_decoder_{}.pt".format(args.name)))
+latent_variance_encoder.load_state_dict(torch.load("latent_variance_encoder_{}.pt".format(args.name)))"""
 
 
 n = 10
@@ -187,8 +196,8 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     low = -1
     high = 5
 
-    if epoch > 100:
-        if epoch % 2 == 0:
+    if epoch >= 100:
+        if epoch % 100 == 0:
             initialize_display_series()
 
     for j in range(n):
@@ -287,7 +296,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
         batch_input_time_points, batch_output_time_points, batch_ground_truth_input, batch_ground_truth_output = \
             time_series_sampler.sample_time_series(scatter_points_num, device=device, mid_val=mid_vals, min_samples=4, max_samples=10, after_samples=80, sampling_method="glucose")
-        color_values = batch_ground_truth_input[:, 0]
+        color_values = batch_ground_truth_output[:, 0]
 
         embeddings = encoder(batch_input_time_points, batch_ground_truth_input.unsqueeze(-1).permute(1, 0, 2))
         if args.reduce_dims:
@@ -307,7 +316,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
             # compute PCA to reduce the embeddings to 2 dimensions.
             embeddings = embeddings - embeddings.mean(dim=0)
             U, S, V = np.linalg.svd(embeddings.cpu().numpy())
-            embeddings = np.matmul(embeddings.cpu().numpy(), V[:, :2])
+            embeddings = torch.matmul(embeddings, torch.tensor(V.T, device=device)).cpu().numpy()
             x = embeddings[:, 0]
             y = embeddings[:, 1]
 
@@ -322,21 +331,19 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
         else:
             color = color_values.detach().cpu().numpy()
             sc = ax[n].scatter(x, y, c=color, cmap="viridis")
-        ax[n].set_xlim(np.min(x), np.max(x))
-        ax[n].set_ylim(np.min(y), np.max(y))
 
         cbar = plt.colorbar(sc)
         cbar.set_label("Glucose level at prediction")
         if args.variational:
             if args.reduce_dims:
-                ax[n].set_title("Embeddings. Loss: {}   KL_loss: {}   LR: {}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()))
+                ax[n].set_title("Embeddings. Loss: {}   KL_loss: {}   LR: {:.3g}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()[0]))
             else:
-                ax[n].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}   LR: {}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()))
+                ax[n].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}   LR: {:.3g}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()[0]))
         else:
             if args.reduce_dims:
-                ax[n].set_title("Embeddings. Loss: {}   LR: {}".format(loss.item(), scheduler.get_last_lr()))
+                ax[n].set_title("Embeddings. Loss: {}   LR: {:.3g}".format(loss.item(), scheduler.get_last_lr()[0]))
             else:
-                ax[n].set_title("Embeddings (PCA). Loss: {}   LR: {}".format(loss.item(), scheduler.get_last_lr()))
+                ax[n].set_title("Embeddings (PCA). Loss: {}   LR: {:.3g}".format(loss.item(), scheduler.get_last_lr()[0]))
 
     epoch += 1
     if epoch % 1000 == 0:
@@ -347,7 +354,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
 
 ctime = time.time()
-plot_interactive(UpdateCallback(odernn_run_plot), frames=2400) # "{}.mp4".format(args.name)
+plot_interactive("{}.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=2400)
 print("Time taken: {}".format(time.time() - ctime))
 
 # Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
