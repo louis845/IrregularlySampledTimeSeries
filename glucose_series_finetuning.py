@@ -1,3 +1,4 @@
+import math
 import time
 import argparse
 import os
@@ -33,11 +34,9 @@ print("Reduce dims:  {}".format(args.reduce_dims))
 print("KL weight:    {}".format(args.kl_loss_weight))
 print("-----------------------------------")
 
-# Create models directories.
-if not os.path.exists("models"):
-    os.makedirs("models")
 if not os.path.exists("models/{}".format(args.name)):
-    os.makedirs("models/{}".format(args.name))
+    print("Error: model {} does not exist in folder models/".format(args.name))
+    quit(-1)
 
 def plot_to_mp4(filename, update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
     fig = plt.figure(figsize=figsize)
@@ -96,10 +95,11 @@ class UpdateCallback:
     def __call__(self, i):
         self.plot_callback(i, self.fig, self.axs)
 
-time_series_sampler.setup_glucose_sampling()
+time_series_sampler.setup_glucose_sampling_with_fixed_decay(0.5)
 time_series_sampler.low = -160
 time_series_sampler.high = 240
 time_series_sampler.samples_width = 1.0 / 80
+time_series_sampler.set_glucose_spikes_generation_method("other")
 
 latent_dims = 32
 gru_hidden_dims = latent_dims * 2 if args.variational else latent_dims
@@ -110,13 +110,26 @@ decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims,
 latent_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
 latent_decoder = torch.nn.Linear(2, latent_dims, device=torch.device("cuda"))
 latent_variance_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=3e-4)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=100, eta_min=1e-5)
+optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=1e-3)
+
+def warmup(current_step: int):
+    if current_step < 50:
+        return current_step / 50.0
+    else:
+        return math.sin(2 * math.pi * (current_step - 50) / 50.0) * 0.495 + 0.505
+scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup)
 
 
 device = torch.device("cuda")
 encoder = encoder.to(device)
 decoder = decoder.to(device)
+
+encoder.load_state_dict(torch.load("models/{}/encoder.pt".format(args.name)))
+decoder.load_state_dict(torch.load("models/{}/decoder.pt".format(args.name)))
+latent_encoder.load_state_dict(torch.load("models/{}/latent_encoder.pt".format(args.name)))
+latent_decoder.load_state_dict(torch.load("models/{}/latent_decoder.pt".format(args.name)))
+latent_variance_encoder.load_state_dict(torch.load("models/{}/latent_variance_encoder.pt".format(args.name)))
+optimizer.load_state_dict(torch.load("models/{}/optimizer.pt".format(args.name)))
 
 n = 12
 
@@ -379,15 +392,15 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
 
 ctime = time.time()
-plot_to_mp4("models/{}/training.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=8000)
+plot_interactive("models/{}/training_finetune.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=3000)
 print("Time taken: {}".format(time.time() - ctime))
 
 # Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
-torch.save(encoder.state_dict(), "models/{}/encoder.pt".format(args.name))
-torch.save(decoder.state_dict(), "models/{}/decoder.pt".format(args.name))
-torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder.pt".format(args.name))
-torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder.pt".format(args.name))
-torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder.pt".format(args.name))
+torch.save(encoder.state_dict(), "models/{}/encoder_finetune.pt".format(args.name))
+torch.save(decoder.state_dict(), "models/{}/decoder_finetune.pt".format(args.name))
+torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder_finetune.pt".format(args.name))
+torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder_finetune.pt".format(args.name))
+torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder_finetune.pt".format(args.name))
 # Save the optimizer state and the scheduler state to files optimizer_{}.pt and scheduler_{}.pt
-torch.save(optimizer.state_dict(), "models/{}/optimizer.pt".format(args.name))
-torch.save(scheduler.state_dict(), "models/{}/scheduler.pt".format(args.name))
+torch.save(optimizer.state_dict(), "models/{}/optimizer_finetune.pt".format(args.name))
+torch.save(scheduler.state_dict(), "models/{}/scheduler_finetune.pt".format(args.name))

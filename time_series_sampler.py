@@ -57,8 +57,17 @@ decay_values = None
 def setup_glucose_sampling(device=torch.device("cuda")):
     global decay_values
     decay_values = (torch.rand(size=(4,), device=device) * 0.4) + 0.7
-    # decay_values = torch.tensor([1.0515, 1.1733, 1.0265, 1.0005], device=device)
     print("decay_values:   ", decay_values)
+
+def setup_glucose_sampling_with_fixed_decay(decay, device=torch.device("cuda")):
+    global decay_values
+    decay_values = torch.ones(size=(4,), device=device, dtype=torch.float32) * torch.tensor(decay, device=device, dtype=torch.float32)
+    print("decay_values:   ", decay_values)
+
+spikes_generation_method = "default"
+def set_glucose_spikes_generation_method(method):
+    global spikes_generation_method
+    spikes_generation_method = method
 
 def generate_glucose_spikes(batch_size, device=torch.device("cuda")):
     onset = torch.rand(size=(batch_size, 4), device=device)
@@ -67,8 +76,11 @@ def generate_glucose_spikes(batch_size, device=torch.device("cuda")):
     onset[:, 2] = onset[:, 2] + 0.2
     onset[:, 3] = onset[:, 2] + onset[:, 3] + 0.6
 
-    weight = torch.rand(size=(batch_size, 4), device=device) * 0.5 + 1.5
-    decay = decay_values[torch.randint(low=0, high=4, size=(batch_size,), device=device)]
+    decay = decay_values[torch.randint(low=0, high=decay_values.shape[0], size=(batch_size,), device=device)]
+    if spikes_generation_method == "default":
+        weight = torch.rand(size=(batch_size, 4), device=device) * 0.5 + 1.5
+    else:
+        weight = torch.rand(size=(batch_size, 4), device=device) * 0.7 + 1.8
     return onset, weight, decay
 
 def sample_time_series(batch_size, min_samples=2, max_samples=10, after_samples=40, device=torch.device("cuda"), mid_val=None, sampling_method="sine"):

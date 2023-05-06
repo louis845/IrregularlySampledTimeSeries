@@ -1,33 +1,23 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, FFMpegWriter
+import pandas as pd
 
-# Set up the figure and axis
-fig, ax = plt.subplots(figsize=(19.2, 10.8))
-ax.set_xlim(0, 2*np.pi)
-ax.set_ylim(-1, 1)
+matrix = np.array([
+    [0, 0, 0.5, 0],
+    [0, 0, 0, 1],
+    [1.0, 0, 0, 0],
+    [0, 1.0, 0.5, 0]
+                  ])
 
-x_offset = 0.0
+# Solve r = 0.8 matrix @ r + 0.2 using fixed point iteration.
+r = np.array([0.0, 0.0, 0.0, 0.0])
 
-# Define the animation function
-def animate(frame):
-    ax.clear()
-    global x_offset
-    x_offset += 0.1
-    x = np.linspace(0, 2*np.pi, 200)
-    y = np.sin(x + x_offset)
-    ax.plot(x, y)
-    ax.set_title("Offset: {:.2f}".format(x_offset))
-    return ax,
+history = [r]
+while True:
+    r = 0.8 * matrix @ r + 0.2
+    history.append(r)
 
-# Create the animation
-anim = FuncAnimation(fig, animate, frames=100, interval=50)
+    # stopping criterion, if the difference between the last two iterations is small enough
+    if len(history) > 1 and np.max(np.abs(history[-1] - history[-2])) < 1e-5:
+        break
 
-# Set up the ffmpeg writer
-writer = FFMpegWriter(fps=30, metadata=dict(artist='Me'), bitrate=1800)
-
-# Save the animation as an mp4 file
-anim.save('sine_curve.mp4', writer=writer)
-
-# Show the animation in a window
-plt.show()
+print(pd.DataFrame(data = np.array(history), columns = ["P", "Q", "R", "S"]))

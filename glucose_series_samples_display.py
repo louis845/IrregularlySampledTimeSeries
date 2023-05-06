@@ -54,6 +54,7 @@ time_series_sampler.setup_glucose_sampling()
 time_series_sampler.low = -160
 time_series_sampler.high = 240
 time_series_sampler.samples_width = 1.0 / 80
+time_series_sampler.setup_glucose_sampling_with_fixed_decay(0.5)
 
 device = torch.device("cuda")
 
