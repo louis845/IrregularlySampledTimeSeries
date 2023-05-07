@@ -116,7 +116,7 @@ def warmup(current_step: int):
     if current_step < 50:
         return current_step / 50.0
     else:
-        return math.sin(2 * math.pi * (current_step - 50) / 50.0) * 0.495 + 0.505
+        return math.exp(-0.05 * (current_step - 50)) * 0.99 + 0.01
 scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup)
 
 
@@ -226,7 +226,7 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     high = 5
 
     if epoch >= 100:
-        if epoch % 100 == 0:
+        if epoch % 25 == 0:
             initialize_display_series()
 
     for j in range(n):
@@ -388,19 +388,30 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
         ctime = time.time() - ctime
         print("Epoch: {} Time taken: {}".format(epoch, ctime))
         ctime = time.time()
+        save_models(epoch)
 
+def save_models(epoch = None):
+    if epoch is None:
+        torch.save(encoder.state_dict(), "models/{}/encoder_finetune.pt".format(args.name))
+        torch.save(decoder.state_dict(), "models/{}/decoder_finetune.pt".format(args.name))
+        torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder_finetune.pt".format(args.name))
+        torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder_finetune.pt".format(args.name))
+        torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder_finetune.pt".format(args.name))
 
+        torch.save(optimizer.state_dict(), "models/{}/optimizer_finetune.pt".format(args.name))
+        torch.save(scheduler.state_dict(), "models/{}/scheduler_finetune.pt".format(args.name))
+    else:
+        torch.save(encoder.state_dict(), "models/{}/encoder_finetune_{}.pt".format(args.name, epoch))
+        torch.save(decoder.state_dict(), "models/{}/decoder_finetune_{}.pt".format(args.name, epoch))
+        torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder_finetune_{}.pt".format(args.name, epoch))
+        torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder_finetune_{}.pt".format(args.name, epoch))
+        torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder_finetune_{}.pt".format(args.name, epoch))
+
+        torch.save(optimizer.state_dict(), "models/{}/optimizer_finetune_{}.pt".format(args.name, epoch))
+        torch.save(scheduler.state_dict(), "models/{}/scheduler_finetune_{}.pt".format(args.name, epoch))
 
 ctime = time.time()
-plot_interactive("models/{}/training_finetune.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=3000)
+plot_to_mp4("models/{}/training_finetune.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=500)
 print("Time taken: {}".format(time.time() - ctime))
 
-# Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
-torch.save(encoder.state_dict(), "models/{}/encoder_finetune.pt".format(args.name))
-torch.save(decoder.state_dict(), "models/{}/decoder_finetune.pt".format(args.name))
-torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder_finetune.pt".format(args.name))
-torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder_finetune.pt".format(args.name))
-torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder_finetune.pt".format(args.name))
-# Save the optimizer state and the scheduler state to files optimizer_{}.pt and scheduler_{}.pt
-torch.save(optimizer.state_dict(), "models/{}/optimizer_finetune.pt".format(args.name))
-torch.save(scheduler.state_dict(), "models/{}/scheduler_finetune.pt".format(args.name))
+save_models()

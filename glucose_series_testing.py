@@ -25,12 +25,21 @@ parser.add_argument("--name", type=str, default="glucose", help="Name (prefix) o
 parser.add_argument("--reduce-dims", action="store_true", help="Whether to reduce the dimensionality of the latent space to 2.")
 # add float argument kl-loss-weight, with description "Weight of the KL loss term. Only used when --variational argument is present." Default value 0.1
 parser.add_argument("--kl-loss-weight", type=float, default=0.01, help="Weight of the KL loss term. Only used when --variational argument is present.")
+# add boolean argument use-alternative-dataset, with description "Whether to use the alternative dataset." Default value False
+parser.add_argument("--use-alternative-dataset", action="store_true", help="Whether to use the alternative dataset.")
+# add float argument learning-rate, with description "Learning rate." Default value 3e-4.
+parser.add_argument("--learning-rate", type=float, default=3e-4, help="Learning rate.")
+# add integer argument num-epochs, with description "Number of epochs to train for." Default value 1000.
+parser.add_argument("--num-epochs", type=int, default=1000, help="Number of epochs to train for.")
 args = parser.parse_args()
 
 print("Using name:   {}".format(args.name))
 print("Variational:  {}".format(args.variational))
 print("Reduce dims:  {}".format(args.reduce_dims))
 print("KL weight:    {}".format(args.kl_loss_weight))
+print("Alt dataset:  {}".format(args.use_alternative_dataset))
+print("Learning rate {}".format(args.learning_rate))
+print("Num epochs:   {}".format(args.num_epochs))
 print("-----------------------------------")
 
 # Create models directories.
@@ -96,7 +105,11 @@ class UpdateCallback:
     def __call__(self, i):
         self.plot_callback(i, self.fig, self.axs)
 
-time_series_sampler.setup_glucose_sampling()
+if args.use_alternative_dataset:
+    time_series_sampler.setup_glucose_sampling_with_fixed_decay(0.5)
+    time_series_sampler.set_glucose_spikes_generation_method("other")
+else:
+    time_series_sampler.setup_glucose_sampling()
 time_series_sampler.low = -160
 time_series_sampler.high = 240
 time_series_sampler.samples_width = 1.0 / 80
@@ -110,8 +123,9 @@ decoder = decoder.Decoder(utils.ODEFuncWrapper(utils.feedforward_nn(latent_dims,
 latent_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
 latent_decoder = torch.nn.Linear(2, latent_dims, device=torch.device("cuda"))
 latent_variance_encoder = torch.nn.Linear(latent_dims, 2, device=torch.device("cuda"))
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=3e-4)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=100, eta_min=1e-5)
+optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=args.learning_rate)
+if not args.use_alternative_dataset:
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=100, eta_min=1e-5)
 
 
 device = torch.device("cuda")
@@ -265,7 +279,8 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     else:
         loss.backward()
     optimizer.step()
-    scheduler.step()
+    if not args.use_alternative_dataset:
+        scheduler.step()
 
     # plot predicted values
     with torch.no_grad():
@@ -361,33 +376,56 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
         if args.variational:
             if args.reduce_dims:
-                ax[n].set_title("Embeddings. Loss: {}   KL_loss: {}   LR: {:.3g}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()[0]))
+                if args.use_alternative_dataset:
+                    ax[n].set_title("Embeddings. Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+                else:
+                    ax[n].set_title("Embeddings. Loss: {}   KL_loss: {}   LR: {:.3g}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()[0]))
             else:
-                ax[n].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}   LR: {:.3g}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()[0]))
+                if args.use_alternative_dataset:
+                    ax[n].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}".format(loss.item(), kl_loss.item()))
+                else:
+                    ax[n].set_title("Embeddings (PCA). Loss: {}   KL_loss: {}   LR: {:.3g}".format(loss.item(), kl_loss.item(), scheduler.get_last_lr()[0]))
         else:
             if args.reduce_dims:
-                ax[n].set_title("Embeddings. Loss: {}   LR: {:.3g}".format(loss.item(), scheduler.get_last_lr()[0]))
+                if args.use_alternative_dataset:
+                    ax[n].set_title("Embeddings. Loss: {}".format(loss.item()))
+                else:
+                    ax[n].set_title("Embeddings. Loss: {}   LR: {:.3g}".format(loss.item(), scheduler.get_last_lr()[0]))
             else:
-                ax[n].set_title("Embeddings (PCA). Loss: {}   LR: {:.3g}".format(loss.item(), scheduler.get_last_lr()[0]))
+                if args.use_alternative_dataset:
+                    ax[n].set_title("Embeddings (PCA). Loss: {}".format(loss.item()))
+                else:
+                    ax[n].set_title("Embeddings (PCA). Loss: {}   LR: {:.3g}".format(loss.item(), scheduler.get_last_lr()[0]))
 
     epoch += 1
     if epoch % 100 == 0:
         ctime = time.time() - ctime
         print("Epoch: {} Time taken: {}".format(epoch, ctime))
         ctime = time.time()
+        save_models(epoch)
 
-
+def save_models(epoch = None):
+    if epoch is None:
+        torch.save(encoder.state_dict(), "models/{}/encoder.pt".format(args.name))
+        torch.save(decoder.state_dict(), "models/{}/decoder.pt".format(args.name))
+        torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder.pt".format(args.name))
+        torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder.pt".format(args.name))
+        torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder.pt".format(args.name))
+        torch.save(optimizer.state_dict(), "models/{}/optimizer.pt".format(args.name))
+        if not args.use_alternative_dataset:
+            torch.save(scheduler.state_dict(), "models/{}/scheduler.pt".format(args.name))
+    else:
+        torch.save(encoder.state_dict(), "models/{}/encoder_{}.pt".format(args.name, epoch))
+        torch.save(decoder.state_dict(), "models/{}/decoder_{}.pt".format(args.name, epoch))
+        torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder_{}.pt".format(args.name, epoch))
+        torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder_{}.pt".format(args.name, epoch))
+        torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder_{}.pt".format(args.name, epoch))
+        torch.save(optimizer.state_dict(), "models/{}/optimizer_{}.pt".format(args.name, epoch))
+        if not args.use_alternative_dataset:
+            torch.save(scheduler.state_dict(), "models/{}/scheduler_{}.pt".format(args.name, epoch))
 
 ctime = time.time()
-plot_to_mp4("models/{}/training.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=8000)
+plot_to_mp4("models/{}/training.mp4".format(args.name), UpdateCallback(odernn_run_plot), frames=args.num_epochs)
 print("Time taken: {}".format(time.time() - ctime))
 
-# Save the learned models encoder, decoder, latent_encoder, latent_decoder to files encoder.pt, decoder.pt, latent_encoder.pt, latent_decoder.pt
-torch.save(encoder.state_dict(), "models/{}/encoder.pt".format(args.name))
-torch.save(decoder.state_dict(), "models/{}/decoder.pt".format(args.name))
-torch.save(latent_encoder.state_dict(), "models/{}/latent_encoder.pt".format(args.name))
-torch.save(latent_decoder.state_dict(), "models/{}/latent_decoder.pt".format(args.name))
-torch.save(latent_variance_encoder.state_dict(), "models/{}/latent_variance_encoder.pt".format(args.name))
-# Save the optimizer state and the scheduler state to files optimizer_{}.pt and scheduler_{}.pt
-torch.save(optimizer.state_dict(), "models/{}/optimizer.pt".format(args.name))
-torch.save(scheduler.state_dict(), "models/{}/scheduler.pt".format(args.name))
+save_models()
