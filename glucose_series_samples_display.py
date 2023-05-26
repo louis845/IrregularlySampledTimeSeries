@@ -15,7 +15,12 @@ import time_series_sampler
 
 # parse arguments.
 parser = argparse.ArgumentParser(description="Visualize the randomly generated glucose time series.")
+
+parser.add_argument("--sample_from_finetuning_set", action="store_true", help="If this argument is added, we sample from the finetuning set. Otherwise, we sample from the batch set.")
+
 args = parser.parse_args()
+
+
 
 def plot_interactive(update_callback, figsize=(25.6, 14.4), frames=240, fps=30, extra_args=['-vcodec', 'libx264']):
     fig = plt.figure(figsize=figsize)
@@ -50,11 +55,14 @@ class UpdateCallback:
     def __call__(self, i):
         self.plot_callback(i, self.fig, self.axs)
 
-time_series_sampler.setup_glucose_sampling()
 time_series_sampler.low = -160
 time_series_sampler.high = 240
 time_series_sampler.samples_width = 1.0 / 80
-time_series_sampler.setup_glucose_sampling_with_fixed_decay(0.5)
+if args.sample_from_finetuning_set:
+    time_series_sampler.setup_glucose_sampling_with_fixed_decay(0.5)
+    time_series_sampler.set_glucose_spikes_generation_method("other")
+else:
+    time_series_sampler.setup_glucose_sampling()
 
 device = torch.device("cuda")
 
@@ -64,7 +72,7 @@ cbar = None
 epoch = 1
 ctime = time.time()
 
-def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
+def display_time_series(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
     global cbar, epoch, ctime
     low = -1
     high = 5
@@ -154,5 +162,5 @@ def odernn_run_plot(i, fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes):
 
 
 ctime = time.time()
-plot_interactive(UpdateCallback(odernn_run_plot), frames=2400, fps=2)
+plot_interactive(UpdateCallback(display_time_series), frames=2400, fps=2)
 print("Time taken: {}".format(time.time() - ctime))
